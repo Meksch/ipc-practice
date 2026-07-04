@@ -5,7 +5,6 @@
 
 #include <chrono>
 #include <csignal>
-#include <cstdlib>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -44,8 +43,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::signal(SIGINT, [](int) { g_running = 0; });
-    std::signal(SIGTERM, [](int) { g_running = 0; });
+    struct sigaction sa{};
+    sa.sa_handler = [](int) { g_running = 0; };
+    sigaction(SIGINT, &sa, nullptr);
+    sigaction(SIGTERM, &sa, nullptr);
 
     ipc::MemBuff buffer = ipc::MemBuff::create(payload_size, slot_count);
     ipc::PauseController pause;
@@ -63,6 +64,9 @@ int main(int argc, char* argv[]) {
         }
 
         ipc::Slot slot = buffer.producer_acquire();
+        if (slot.header == nullptr) {  // on shutdown guard against empty slot
+            continue;
+        }
 
         fill_payload(slot.payload, payload_size);
         slot.header->marker = ipc::kMarker;

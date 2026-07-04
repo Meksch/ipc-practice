@@ -17,7 +17,6 @@ struct Stats {
     std::atomic<uint64_t> total{0};
     std::atomic<uint64_t> invalid_checksum{0};
     std::atomic<uint64_t> bad_header{0};
-    std::atomic<uint64_t> sequence_errors{0};
 };
 
 bool parse_args(int argc, char* argv[], std::string& shm_name) {
@@ -33,7 +32,6 @@ bool parse_args(int argc, char* argv[], std::string& shm_name) {
 }
 
 void gather_stats(const ipc::Slot& slot, uint32_t payload_size, Stats& stats) {
-    static uint32_t next_sequence = 0;
     stats.total.fetch_add(1);
 
     if (slot.header->marker != ipc::kMarker || slot.header->payload_size != payload_size) {
@@ -42,11 +40,6 @@ void gather_stats(const ipc::Slot& slot, uint32_t payload_size, Stats& stats) {
     if (ipc::crc32(slot.payload, payload_size) != slot.header->checksum) {
         stats.invalid_checksum.fetch_add(1);
     }
-
-    if (slot.header->sequence != next_sequence) {
-        stats.sequence_errors.fetch_add(1);
-    }
-    next_sequence = slot.header->sequence + 1;
 }
 
 void stats_loop(const Stats& stats, uint32_t payload_size, const ipc::PauseController& pause) {
@@ -77,8 +70,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::signal(SIGINT, [](int) { g_running = 0; });
-    std::signal(SIGTERM, [](int) { g_running = 0; });
+    struct sigaction sa{};
+    sa.sa_handler = [](int) { g_running = 0; };
+    sigaction(SIGINT, &sa, nullptr);
+    sigaction(SIGTERM, &sa, nullptr);
 
     ipc::MemBuff buffer = ipc::MemBuff::attach(mem_name);
     const uint32_t payload_size = buffer.payload_size();
@@ -103,6 +98,9 @@ int main(int argc, char* argv[]) {
         }
 
         ipc::Slot slot = buffer.consumer_acquire();
+        if (slot.header == nullptr) {  // on shutdown guard against empty slot
+            continue;
+        }
         gather_stats(slot, payload_size, stats);
         buffer.consumer_release();
     }

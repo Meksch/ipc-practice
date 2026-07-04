@@ -22,11 +22,7 @@ public:
     static SharedMemory attach(const std::string& name);   // for consumer
 
     void* data() const { return m_addr; }
-    std::size_t size() const { return m_size; }
     const std::string& name() const { return m_name; }
-    bool is_owner() const { return m_owner; }
-
-    void unlink();
 
 private:
     SharedMemory(int fd, void* addr, std::size_t size, std::string name, bool owner);

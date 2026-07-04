@@ -74,20 +74,13 @@ SharedMemory SharedMemory::attach(const std::string& name) {
     struct stat st {};
     fstat(fd, &st);
     const auto size = static_cast<std::size_t>(st.st_size);
-    
+
     void* addr = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (addr == MAP_FAILED) {
         close(fd);
     }
 
     return SharedMemory(fd, addr, size, name, false);
-}
-
-void SharedMemory::unlink() {
-    if (m_owner) {
-        shm_unlink(m_name.c_str());
-        m_owner = false;
-    }
 }
 
 SharedMemory::~SharedMemory() {
