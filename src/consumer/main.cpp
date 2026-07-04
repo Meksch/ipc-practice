@@ -1,6 +1,7 @@
 #include "ipc/checksum.hpp"
 #include "ipc/mem_buffer.hpp"
 #include "ipc/packet.hpp"
+#include "ipc/pause_controller.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -48,7 +49,7 @@ void gather_stats(const ipc::Slot& slot, uint32_t payload_size, Stats& stats) {
     next_sequence = slot.header->sequence + 1;
 }
 
-void stats_loop(const Stats& stats, uint32_t payload_size) {
+void stats_loop(const Stats& stats, uint32_t payload_size, const ipc::PauseController& pause) {
     uint64_t prev_total = 0;
 
     while (g_running) {
@@ -64,7 +65,8 @@ void stats_loop(const Stats& stats, uint32_t payload_size) {
         std::cerr << std::fixed << std::setprecision(1)
                   << "stats: total=" << total
                   << " throughput=" << mib_per_s << " MiB/s"
-                  << " invalid=" << invalid << "\n";
+                  << " invalid=" << invalid
+                  << " paused=" << (pause.is_paused() ? "yes" : "no") << "\n";
     }
 }
 
@@ -85,17 +87,27 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    ipc::PauseController pause;
+    pause.start();
+
     std::cout << "consumer ready" << '\n';
 
     Stats stats;
-    std::thread througput_tracker(stats_loop, std::ref(stats), payload_size);
+    std::thread througput_tracker(stats_loop, std::cref(stats), payload_size, std::cref(pause));
 
     while (g_running) {
+        pause.process();
+        if (pause.is_paused()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+
         ipc::Slot slot = buffer.consumer_acquire();
         gather_stats(slot, payload_size, stats);
         buffer.consumer_release();
     }
 
+    pause.stop();
     througput_tracker.join();
     std::cerr << "consumer stopped after " << stats.total.load() << " packets\n";
     return 0;

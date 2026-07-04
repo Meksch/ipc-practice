@@ -13,8 +13,6 @@ namespace ipc {
 struct ControlBlock {
     uint32_t payload_size{0};
     uint32_t slot_count{0};
-    std::atomic<bool> producer_paused{false};
-    std::atomic<bool> consumer_paused{false};
     std::atomic<uint32_t> write_index{0};
     std::atomic<uint32_t> read_index{0};
     sem_t sem_empty{};

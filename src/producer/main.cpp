@@ -1,11 +1,14 @@
 #include "ipc/checksum.hpp"
 #include "ipc/mem_buffer.hpp"
 #include "ipc/packet.hpp"
+#include "ipc/pause_controller.hpp"
 
+#include <chrono>
 #include <csignal>
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <thread>
 
 volatile std::sig_atomic_t g_running = 1;
 
@@ -41,15 +44,24 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::signal(SIGINT, [](int) { g_running = 0; });  //kill -INT <pid>
-    std::signal(SIGTERM, [](int) { g_running = 0; }); //kill -TERM <pid>
+    std::signal(SIGINT, [](int) { g_running = 0; });
+    std::signal(SIGTERM, [](int) { g_running = 0; });
 
     ipc::MemBuff buffer = ipc::MemBuff::create(payload_size, slot_count);
+    ipc::PauseController pause;
+    pause.start();
+
     std::cout << "producer ready, mem-name=" << buffer.name()
               << " payload=" << payload_size << " slots=" << slot_count << '\n';
 
     uint32_t sequence = 0;
     while (g_running) {
+        pause.process();
+        if (pause.is_paused()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+
         ipc::Slot slot = buffer.producer_acquire();
 
         fill_payload(slot.payload, payload_size);
@@ -62,6 +74,7 @@ int main(int argc, char* argv[]) {
         buffer.producer_release();
     }
 
+    pause.stop();
     std::cerr << "producer stopped after " << sequence << " packets\n";
     return 0;
 }

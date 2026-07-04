@@ -20,6 +20,7 @@ add_library(ipc_common STATIC
   src/checksum.cpp
   src/shared_memory.cpp
   src/mem_buffer.cpp
+  src/pause_controller.cpp
 )
 target_include_directories(ipc_common PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(ipc_common PUBLIC ${IPC_PLATFORM_LIBS})
