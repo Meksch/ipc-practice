@@ -17,7 +17,6 @@ if(IPC_RT_LIBRARY)
 endif()
 
 add_library(ipc_common STATIC
-  src/packet.cpp
   src/checksum.cpp
   src/shared_memory.cpp
   src/mem_buffer.cpp

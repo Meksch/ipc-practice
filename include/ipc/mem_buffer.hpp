@@ -31,8 +31,8 @@ public:
     MemBuff() = default;
     ~MemBuff();
 
-    static MemBuff create(uint32_t payload_size, uint32_t slot_count);   // for producer
-    static MemBuff attach(const std::string& name);                      // for consumer
+    static MemBuff create(uint32_t payload_size, uint32_t slot_count);   // for producer: create shm + buff
+    static MemBuff attach(const std::string& name);                      // for consumer: open existing shm
 
     const std::string& name() const { return m_memory.name(); }
     uint32_t payload_size() const { return m_control->payload_size; }

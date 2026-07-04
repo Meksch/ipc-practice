@@ -1,11 +1,102 @@
-#include <iostream>
+#include "ipc/checksum.hpp"
+#include "ipc/mem_buffer.hpp"
+#include "ipc/packet.hpp"
 
-#include "ipc/version.hpp"
+#include <atomic>
+#include <chrono>
+#include <csignal>
+#include <iostream>
+#include <iomanip>
+#include <string>
+#include <thread>
+
+volatile std::sig_atomic_t g_running = 1;
+
+struct Stats {
+    std::atomic<uint64_t> total{0};
+    std::atomic<uint64_t> invalid_checksum{0};
+    std::atomic<uint64_t> bad_header{0};
+    std::atomic<uint64_t> sequence_errors{0};
+};
+
+bool parse_args(int argc, char* argv[], std::string& shm_name) {
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--mem-name" && i + 1 < argc) {
+            shm_name = argv[++i];
+        } else {
+            return false;
+        }
+    }
+    return !shm_name.empty();
+}
+
+void gather_stats(const ipc::Slot& slot, uint32_t payload_size, Stats& stats) {
+    static uint32_t next_sequence = 0;
+    stats.total.fetch_add(1);
+
+    if (slot.header->marker != ipc::kMarker || slot.header->payload_size != payload_size) {
+        stats.bad_header.fetch_add(1);
+    }
+    if (ipc::crc32(slot.payload, payload_size) != slot.header->checksum) {
+        stats.invalid_checksum.fetch_add(1);
+    }
+
+    if (slot.header->sequence != next_sequence) {
+        stats.sequence_errors.fetch_add(1);
+    }
+    next_sequence = slot.header->sequence + 1;
+}
+
+void stats_loop(const Stats& stats, uint32_t payload_size) {
+    uint64_t prev_total = 0;
+
+    while (g_running) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+
+        const uint64_t total = stats.total.load();
+        const uint64_t delta = total - prev_total;
+        prev_total = total;
+
+        const double mib_per_s = (static_cast<double>(delta) * payload_size) / (1024.0 * 1024.0);
+        const uint64_t invalid = stats.invalid_checksum.load() + stats.bad_header.load();
+
+        std::cerr << std::fixed << std::setprecision(1)
+                  << "stats: total=" << total
+                  << " throughput=" << mib_per_s << " MiB/s"
+                  << " invalid=" << invalid << "\n";
+    }
+}
 
 int main(int argc, char* argv[]) {
-    (void)argc;
-    (void)argv;
+    std::string mem_name;
+    if (!parse_args(argc, argv, mem_name)) {
+        std::cerr << "usage: consumer --mem-name NAME\n";
+        return 1;
+    }
 
-    std::cout << ipc::kPracticeVersion << " consumer " << '\n';
+    std::signal(SIGINT, [](int) { g_running = 0; });
+    std::signal(SIGTERM, [](int) { g_running = 0; });
+
+    ipc::MemBuff buffer = ipc::MemBuff::attach(mem_name);
+    const uint32_t payload_size = buffer.payload_size();
+    if (payload_size == 0) {
+        std::cerr << "failed to attach to " << mem_name << " (start producer first)\n";
+        return 1;
+    }
+
+    std::cout << "consumer ready" << '\n';
+
+    Stats stats;
+    std::thread througput_tracker(stats_loop, std::ref(stats), payload_size);
+
+    while (g_running) {
+        ipc::Slot slot = buffer.consumer_acquire();
+        gather_stats(slot, payload_size, stats);
+        buffer.consumer_release();
+    }
+
+    througput_tracker.join();
+    std::cerr << "consumer stopped after " << stats.total.load() << " packets\n";
     return 0;
 }
